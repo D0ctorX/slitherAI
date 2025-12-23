@@ -2,35 +2,38 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>AI Slither Learning - Evolution Pro</title>
+    <title>AI Slither Evolution - Battle Royale</title>
     <style>
-        body { margin: 0; background: #222; color: white; font-family: sans-serif; display: flex; }
-        #sidebar { width: 250px; background: #333; padding: 20px; border-right: 2px solid #444; }
+        body { margin: 0; background: #222; color: white; font-family: 'Segoe UI', sans-serif; display: flex; overflow: hidden; }
+        #sidebar { width: 280px; background: #333; padding: 20px; border-right: 2px solid #444; height: 100vh; overflow-y: auto; }
         canvas { flex-grow: 1; background: #111; }
-        .stat-box { background: #444; padding: 10px; margin-bottom: 10px; border-radius: 5px; }
-        input { width: 80%; padding: 5px; margin-top: 5px; }
-        button { cursor: pointer; background: #28a745; color: white; border: none; padding: 10px; width: 100%; margin-top: 10px; border-radius: 5px; }
+        .stat-box { background: #444; padding: 10px; margin-bottom: 10px; border-radius: 5px; border-left: 5px solid #28a745; }
+        .player-row { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 0.9em; }
+        input { width: 100%; padding: 8px; margin: 10px 0; box-sizing: border-box; border-radius: 4px; border: none; }
+        button { cursor: pointer; background: #28a745; color: white; border: none; padding: 10px; width: 100%; border-radius: 5px; font-weight: bold; }
         button:hover { background: #218838; }
-        #status { color: #ffc107; font-weight: bold; margin-top: 10px; }
+        #status { color: #ffc107; font-weight: bold; margin-top: 10px; text-align: center; }
+        .zone-info { color: #ff4757; font-weight: bold; }
     </style>
 </head>
 <body>
 
 <div id="sidebar">
-    <h2>Contrôles</h2>
+    <h2>🧬 AI Evolution</h2>
     <div class="stat-box">
         Génération: <span id="gen">1</span><br>
-        Record: <span id="maxScore">0</span>
+        Record Score: <span id="maxScore">0</span><br>
+        <span class="zone-info">Rayon Zone: <span id="zoneRadiusDisplay">0</span>px</span>
     </div>
     
     <div class="stat-box">
-        <label>Itérations rapides :</label>
-        <input type="number" id="iterInput" value="10" min="1">
+        <label>Simuler X générations :</label>
+        <input type="number" id="iterInput" value="5" min="1">
         <button onclick="runFastForward()">Lancer Simulation</button>
         <div id="status"></div>
     </div>
 
-    <div id="livesInfo"></div>
+    <div id="playerStats"></div>
 </div>
 
 <canvas id="gameCanvas"></canvas>
@@ -38,36 +41,44 @@
 <script>
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
-canvas.width = window.innerWidth - 250;
-canvas.height = window.innerHeight;
+
+function resize() {
+    canvas.width = window.innerWidth - 280;
+    canvas.height = window.innerHeight;
+}
+window.onresize = resize;
+resize();
 
 const CONFIG = {
     numSnakes: 6,
-    numFood: 30,
-    mutationRate: 0.1,
-    maxLives: 3
+    numFood: 40,
+    mutationRate: 0.15,
+    maxLives: 3,
+    initialZoneRadius: Math.max(canvas.width, canvas.height) / 1.2,
+    zoneShrinkRate: 0.2 // Vitesse à laquelle la zone rétrécit
 };
 
-function sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
+let zoneRadius = CONFIG.initialZoneRadius;
 
 class NeuralNetwork {
     constructor(weights) {
-        this.weights = weights || Array.from({length: 7}, () => Math.random() * 2 - 1);
+        this.weights = weights || Array.from({length: 8}, () => Math.random() * 2 - 1);
     }
     predict(inputs) {
         let sum = 0;
         inputs.forEach((val, i) => sum += val * this.weights[i]);
-        return (sigmoid(sum) - 0.5) * 0.2;
+        return (1 / (1 + Math.exp(-sum)) - 0.5) * 0.25;
     }
     mutate() {
         return new NeuralNetwork(this.weights.map(w => 
-            Math.random() < CONFIG.mutationRate ? w + (Math.random() * 2 - 1) * 0.3 : w
+            Math.random() < CONFIG.mutationRate ? w + (Math.random() * 2 - 1) * 0.4 : w
         ));
     }
 }
 
 class Snake {
-    constructor(brain) {
+    constructor(id, brain) {
+        this.id = id;
         this.brain = brain || new NeuralNetwork();
         this.fullReset();
     }
@@ -80,27 +91,35 @@ class Snake {
     }
 
     respawn() {
-        this.x = Math.random() * canvas.width;
-        this.y = Math.random() * canvas.height;
+        const angle = Math.random() * Math.PI * 2;
+        const r = Math.random() * (zoneRadius * 0.5);
+        this.x = canvas.width/2 + Math.cos(angle) * r;
+        this.y = canvas.height/2 + Math.sin(angle) * r;
         this.angle = Math.random() * Math.PI * 2;
-        this.radius = 10;
-        this.tail = [{x: this.x, y: this.y}];
-        this.length = 5;
+        this.currentWidth = 10;
+        this.tail = [];
+        this.length = 10;
         this.isAlive = true;
     }
 
     update() {
         if (!this.isAlive) return;
 
-        let inputs = [this.x/canvas.width, this.y/canvas.height, Math.cos(this.angle), Math.sin(this.angle), 0, 0, 0];
-        let turn = this.brain.predict(inputs);
-        this.angle += turn;
+        // Inputs: Position relative au centre + Angle + Distance zone
+        let dx = (this.x - canvas.width/2) / canvas.width;
+        let dy = (this.y - canvas.height/2) / canvas.height;
+        let distToCenter = Math.hypot(this.x - canvas.width/2, this.y - canvas.height/2) / zoneRadius;
+        
+        let inputs = [dx, dy, distToCenter, Math.cos(this.angle), Math.sin(this.angle), 1, 0, 0];
+        this.angle += this.brain.predict(inputs);
 
-        this.x += Math.cos(this.angle) * 4;
-        this.y += Math.sin(this.angle) * 4;
+        this.x += Math.cos(this.angle) * 3.5;
+        this.y += Math.sin(this.angle) * 3.5;
         this.distanceTraveled++;
 
-        if (this.x < 0 || this.x > canvas.width || this.y < 0 || this.y > canvas.height) {
+        // Sortie de zone (Punition)
+        let distFromCenter = Math.hypot(this.x - canvas.width/2, this.y - canvas.height/2);
+        if (distFromCenter > zoneRadius) {
             this.loseLife();
         }
 
@@ -110,68 +129,79 @@ class Snake {
 
     loseLife() {
         this.lives--;
-        if (this.lives > 0) {
-            this.respawn();
-        } else {
-            this.isAlive = false;
-        }
+        if (this.lives > 0) this.respawn();
+        else this.isAlive = false;
     }
 
-    draw(index) {
+    draw() {
         if (!this.isAlive) return;
-        ctx.beginPath();
-        ctx.fillStyle = `hsl(${(index * 60)}, 70%, 50%)`;
-        this.tail.forEach(p => ctx.arc(p.x, p.y, this.radius, 0, Math.PI*2));
-        ctx.fill();
-        ctx.closePath();
+        ctx.fillStyle = `hsl(${(this.id * 60)}, 70%, 50%)`;
+        
+        // Dessin du corps
+        this.tail.forEach((p, i) => {
+            const size = this.currentWidth * (1 - i/this.tail.length * 0.5);
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, size, 0, Math.PI*2);
+            ctx.fill();
+        });
+
+        // Numéro du serpent
+        ctx.fillStyle = "white";
+        ctx.font = "bold 14px Arial";
+        ctx.fillText(this.id, this.x - 5, this.y - 20);
     }
 }
 
-let snakes = Array.from({length: CONFIG.numSnakes}, () => new Snake());
+let snakes = Array.from({length: CONFIG.numSnakes}, (_, i) => new Snake(i + 1));
 let foods = Array.from({length: CONFIG.numFood}, () => ({x: Math.random()*canvas.width, y: Math.random()*canvas.height}));
 let generation = 1;
 let highScore = 0;
 let isSimulating = false;
 
 function evolve() {
-    snakes.sort((a, b) => (b.distanceTraveled + b.score * 200) - (a.distanceTraveled + a.score * 200));
+    snakes.sort((a, b) => (b.distanceTraveled + b.score * 500) - (a.distanceTraveled + a.score * 500));
     let bestBrain = snakes[0].brain;
     if (snakes[0].score > highScore) highScore = snakes[0].score;
 
     snakes = snakes.map((s, i) => {
-        if (i === 0) return new Snake(bestBrain);
-        return new Snake(bestBrain.mutate());
+        let newS = new Snake(i + 1, i === 0 ? bestBrain : bestBrain.mutate());
+        return newS;
     });
 
     generation++;
-    updateUI();
+    zoneRadius = CONFIG.initialZoneRadius; // Reset la zone
 }
 
 function updateUI() {
     document.getElementById('gen').innerText = generation;
     document.getElementById('maxScore').innerText = highScore;
-    let livesHtml = "<b>Vies restantes :</b><br>";
-    snakes.forEach((s, i) => {
-        livesHtml += `Joueur ${i+1}: ${s.isAlive ? '❤️'.repeat(s.lives) : '💀'}<br>`;
+    document.getElementById('zoneRadiusDisplay').innerText = Math.round(zoneRadius);
+    
+    let html = "<b>État des Joueurs :</b><br><br>";
+    snakes.forEach((s) => {
+        html += `<div class="player-row">
+            <span>#${s.id} ${s.isAlive ? '❤️'.repeat(s.lives) : '💀'}</span>
+            <span>Taille: <b>${Math.round(s.length)}</b></span>
+        </div>`;
     });
-    document.getElementById('livesInfo').innerHTML = livesHtml;
+    document.getElementById('playerStats').innerHTML = html;
 }
 
 async function runFastForward() {
     if (isSimulating) return;
     const iterations = parseInt(document.getElementById('iterInput').value);
     isSimulating = true;
-    document.getElementById('status').innerText = "Simulation en cours...";
+    document.getElementById('status').innerText = "Simulation accélérée...";
 
-    // On utilise setTimeout pour ne pas geler le navigateur
     for (let i = 0; i < iterations; i++) {
         while (snakes.some(s => s.isAlive)) {
+            zoneRadius -= CONFIG.zoneShrinkRate * 2; // Rétrécit plus vite en simu
             snakes.forEach(s => {
                 if (s.isAlive) {
                     s.update();
                     foods.forEach(f => {
-                        if (Math.hypot(s.x-f.x, s.y-f.y) < 15) {
-                            s.score++; s.length++;
+                        if (Math.hypot(s.x-f.x, s.y-f.y) < s.currentWidth + 5) {
+                            s.score++; s.length += 5; s.currentWidth += 0.5;
                             f.x = Math.random()*canvas.width; f.y = Math.random()*canvas.height;
                         }
                     });
@@ -179,30 +209,39 @@ async function runFastForward() {
             });
         }
         evolve();
-        if (i % 5 === 0) await new Promise(r => setTimeout(r, 1)); // Petite pause pour l'UI
+        if (i % 2 === 0) await new Promise(r => setTimeout(r, 1));
     }
-
     isSimulating = false;
-    document.getElementById('status').innerText = "Terminé !";
+    document.getElementById('status').innerText = "Prêt !";
 }
 
 function loop() {
     if (!isSimulating) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         
-        if (!snakes.some(s => s.isAlive)) {
-            evolve();
-        }
+        // Dessiner la zone de sécurité
+        ctx.strokeStyle = "rgba(255, 71, 87, 0.5)";
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.arc(canvas.width/2, canvas.height/2, zoneRadius, 0, Math.PI*2);
+        ctx.stroke();
 
-        snakes.forEach((s, i) => {
+        zoneRadius -= CONFIG.zoneShrinkRate;
+        if (zoneRadius < 50) zoneRadius = 50;
+
+        if (!snakes.some(s => s.isAlive)) evolve();
+
+        snakes.forEach((s) => {
             s.update();
-            s.draw(i);
+            s.draw();
             
             foods.forEach(f => {
                 ctx.fillStyle = "#0f0";
                 ctx.beginPath(); ctx.arc(f.x, f.y, 5, 0, Math.PI*2); ctx.fill();
-                if (s.isAlive && Math.hypot(s.x-f.x, s.y-f.y) < 15) {
-                    s.score++; s.length++;
+                if (s.isAlive && Math.hypot(s.x-f.x, s.y-f.y) < s.currentWidth + 5) {
+                    s.score++; 
+                    s.length += 5; 
+                    s.currentWidth += 0.5; // Grossit physiquement
                     f.x = Math.random()*canvas.width; f.y = Math.random()*canvas.height;
                 }
             });
