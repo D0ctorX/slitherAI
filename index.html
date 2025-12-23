@@ -2,35 +2,32 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>AI Slither Evolution - Battle Royale</title>
+    <title>AI Slither - Vision & Intelligence</title>
     <style>
-        body { margin: 0; background: #222; color: white; font-family: 'Segoe UI', sans-serif; display: flex; overflow: hidden; }
-        #sidebar { width: 280px; background: #333; padding: 20px; border-right: 2px solid #444; height: 100vh; overflow-y: auto; }
-        canvas { flex-grow: 1; background: #111; }
-        .stat-box { background: #444; padding: 10px; margin-bottom: 10px; border-radius: 5px; border-left: 5px solid #28a745; }
-        .player-row { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 0.9em; }
-        input { width: 100%; padding: 8px; margin: 10px 0; box-sizing: border-box; border-radius: 4px; border: none; }
-        button { cursor: pointer; background: #28a745; color: white; border: none; padding: 10px; width: 100%; border-radius: 5px; font-weight: bold; }
-        button:hover { background: #218838; }
-        #status { color: #ffc107; font-weight: bold; margin-top: 10px; text-align: center; }
-        .zone-info { color: #ff4757; font-weight: bold; }
+        body { margin: 0; background: #1a1a1a; color: white; font-family: sans-serif; display: flex; overflow: hidden; }
+        #sidebar { width: 300px; background: #2c3e50; padding: 20px; border-right: 3px solid #1a1a1a; height: 100vh; }
+        canvas { flex-grow: 1; background: #000; cursor: crosshair; }
+        .stat-box { background: #34495e; padding: 15px; margin-bottom: 15px; border-radius: 8px; border-left: 5px solid #27ae60; }
+        button { cursor: pointer; background: #27ae60; color: white; border: none; padding: 12px; width: 100%; border-radius: 5px; font-weight: bold; font-size: 1.1em; }
+        button:hover { background: #2ecc71; }
+        #playerStats { font-family: monospace; }
+        .vision-debug { color: #bdc3c7; font-size: 0.8em; margin-top: 5px; }
     </style>
 </head>
 <body>
 
 <div id="sidebar">
-    <h2>🧬 AI Evolution</h2>
+    <h2>🧠 IA Vision V2</h2>
     <div class="stat-box">
         Génération: <span id="gen">1</span><br>
-        Record Score: <span id="maxScore">0</span><br>
-        <span class="zone-info">Rayon Zone: <span id="zoneRadiusDisplay">0</span>px</span>
+        Meilleure Taille: <span id="maxScore">0</span>
     </div>
     
     <div class="stat-box">
-        <label>Simuler X générations :</label>
-        <input type="number" id="iterInput" value="5" min="1">
-        <button onclick="runFastForward()">Lancer Simulation</button>
-        <div id="status"></div>
+        <label>Bond technologique (Générations) :</label>
+        <input type="number" id="iterInput" value="10" min="1" style="width:100%; margin:10px 0; padding:8px;">
+        <button onclick="runFastForward()">Accélérer l'Évolution</button>
+        <div id="status" style="color:#f1c40f; margin-top:10px; text-align:center;"></div>
     </div>
 
     <div id="playerStats"></div>
@@ -41,37 +38,35 @@
 <script>
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
-
-function resize() {
-    canvas.width = window.innerWidth - 280;
-    canvas.height = window.innerHeight;
-}
-window.onresize = resize;
-resize();
+canvas.width = window.innerWidth - 300;
+canvas.height = window.innerHeight;
 
 const CONFIG = {
     numSnakes: 6,
-    numFood: 40,
-    mutationRate: 0.15,
+    numFood: 50,
+    mutationRate: 0.2,
     maxLives: 3,
-    initialZoneRadius: Math.max(canvas.width, canvas.height) / 1.2,
-    zoneShrinkRate: 0.2 // Vitesse à laquelle la zone rétrécit
+    initialZoneRadius: Math.max(canvas.width, canvas.height) / 1.3,
+    numRays: 8, // Nombre de directions que l'IA regarde
+    rayDistance: 300 // Portée de la vue
 };
 
 let zoneRadius = CONFIG.initialZoneRadius;
 
 class NeuralNetwork {
     constructor(weights) {
-        this.weights = weights || Array.from({length: 8}, () => Math.random() * 2 - 1);
+        // Entrées : 8 rayons (nourriture) + 8 rayons (zone) + vitesse + angle = 18 entrées
+        const inputSize = 18;
+        this.weights = weights || Array.from({length: inputSize}, () => Math.random() * 2 - 1);
     }
     predict(inputs) {
         let sum = 0;
         inputs.forEach((val, i) => sum += val * this.weights[i]);
-        return (1 / (1 + Math.exp(-sum)) - 0.5) * 0.25;
+        return Math.tanh(sum) * 0.3; // Sortie entre -0.3 et 0.3 radians (virage)
     }
     mutate() {
         return new NeuralNetwork(this.weights.map(w => 
-            Math.random() < CONFIG.mutationRate ? w + (Math.random() * 2 - 1) * 0.4 : w
+            Math.random() < CONFIG.mutationRate ? w + (Math.random() - 0.5) : w
         ));
     }
 }
@@ -91,35 +86,64 @@ class Snake {
     }
 
     respawn() {
-        const angle = Math.random() * Math.PI * 2;
-        const r = Math.random() * (zoneRadius * 0.5);
-        this.x = canvas.width/2 + Math.cos(angle) * r;
-        this.y = canvas.height/2 + Math.sin(angle) * r;
+        this.x = canvas.width/2 + (Math.random()-0.5) * 100;
+        this.y = canvas.height/2 + (Math.random()-0.5) * 100;
         this.angle = Math.random() * Math.PI * 2;
-        this.currentWidth = 10;
+        this.currentWidth = 8;
         this.tail = [];
-        this.length = 10;
+        this.length = 15;
         this.isAlive = true;
+        this.viewData = []; // Pour le debug visuel
     }
 
-    update() {
+    update(foods) {
         if (!this.isAlive) return;
 
-        // Inputs: Position relative au centre + Angle + Distance zone
-        let dx = (this.x - canvas.width/2) / canvas.width;
-        let dy = (this.y - canvas.height/2) / canvas.height;
-        let distToCenter = Math.hypot(this.x - canvas.width/2, this.y - canvas.height/2) / zoneRadius;
+        // --- CONSTRUCTION DE LA VISION ---
+        let inputs = [];
+        this.viewData = [];
+
+        for (let i = 0; i < CONFIG.numRays; i++) {
+            let rayAngle = this.angle + (i * Math.PI * 2 / CONFIG.numRays);
+            let foodDist = 1; // 1 = rien vu, 0 = très proche
+            let zoneDist = 1;
+
+            // Détection nourriture sur ce rayon
+            foods.forEach(f => {
+                let dx = f.x - this.x;
+                let dy = f.y - this.y;
+                let dist = Math.hypot(dx, dy);
+                let angleToFood = Math.atan2(dy, dx);
+                let diff = Math.abs(rayAngle - angleToFood) % (Math.PI * 2);
+                if (diff < 0.2 && dist < CONFIG.rayDistance) {
+                    foodDist = Math.min(foodDist, dist / CONFIG.rayDistance);
+                }
+            });
+
+            // Détection bord de zone sur ce rayon
+            let rayX = this.x + Math.cos(rayAngle) * CONFIG.rayDistance;
+            let rayY = this.y + Math.sin(rayAngle) * CONFIG.rayDistance;
+            let distFromCenter = Math.hypot(rayX - canvas.width/2, rayY - canvas.height/2);
+            if (distFromCenter > zoneRadius) zoneDist = 0.5; // Alerte zone proche
+
+            inputs.push(foodDist);
+            inputs.push(zoneDist);
+            this.viewData.push({angle: rayAngle, dist: foodDist});
+        }
         
-        let inputs = [dx, dy, distToCenter, Math.cos(this.angle), Math.sin(this.angle), 1, 0, 0];
+        inputs.push(Math.cos(this.angle));
+        inputs.push(Math.sin(this.angle));
+
+        // IA décide
         this.angle += this.brain.predict(inputs);
 
-        this.x += Math.cos(this.angle) * 3.5;
-        this.y += Math.sin(this.angle) * 3.5;
-        this.distanceTraveled++;
+        // Physique
+        this.x += Math.cos(this.angle) * 4;
+        this.y += Math.sin(this.angle) * 4;
+        this.distanceTraveled += 0.1; // Récompense de survie minime
 
-        // Sortie de zone (Punition)
-        let distFromCenter = Math.hypot(this.x - canvas.width/2, this.y - canvas.height/2);
-        if (distFromCenter > zoneRadius) {
+        // Mort par zone
+        if (Math.hypot(this.x - canvas.width/2, this.y - canvas.height/2) > zoneRadius) {
             this.loseLife();
         }
 
@@ -135,20 +159,26 @@ class Snake {
 
     draw() {
         if (!this.isAlive) return;
-        ctx.fillStyle = `hsl(${(this.id * 60)}, 70%, 50%)`;
         
-        // Dessin du corps
-        this.tail.forEach((p, i) => {
-            const size = this.currentWidth * (1 - i/this.tail.length * 0.5);
+        // Dessin des rayons de vision (optionnel, pour voir ce qu'il voit)
+        ctx.strokeStyle = "rgba(255,255,255,0.05)";
+        this.viewData.forEach(v => {
             ctx.beginPath();
-            ctx.arc(p.x, p.y, size, 0, Math.PI*2);
+            ctx.moveTo(this.x, this.y);
+            ctx.lineTo(this.x + Math.cos(v.angle) * 50, this.y + Math.sin(v.angle) * 50);
+            ctx.stroke();
+        });
+
+        ctx.fillStyle = `hsl(${(this.id * 60)}, 70%, 50%)`;
+        this.tail.forEach((p, i) => {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, this.currentWidth * (1 - i/this.tail.length * 0.4), 0, Math.PI*2);
             ctx.fill();
         });
 
-        // Numéro du serpent
         ctx.fillStyle = "white";
-        ctx.font = "bold 14px Arial";
-        ctx.fillText(this.id, this.x - 5, this.y - 20);
+        ctx.font = "bold 12px Arial";
+        ctx.fillText("IA-" + this.id, this.x - 15, this.y - 15);
     }
 }
 
@@ -159,94 +189,92 @@ let highScore = 0;
 let isSimulating = false;
 
 function evolve() {
-    snakes.sort((a, b) => (b.distanceTraveled + b.score * 500) - (a.distanceTraveled + a.score * 500));
+    // Score = Taille + Distance. Manger est beaucoup plus récompensé.
+    snakes.sort((a, b) => (b.length * 10 + b.distanceTraveled) - (a.length * 10 + a.distanceTraveled));
     let bestBrain = snakes[0].brain;
-    if (snakes[0].score > highScore) highScore = snakes[0].score;
+    if (snakes[0].length > highScore) highScore = snakes[0].length;
 
     snakes = snakes.map((s, i) => {
-        let newS = new Snake(i + 1, i === 0 ? bestBrain : bestBrain.mutate());
-        return newS;
+        return new Snake(i + 1, i === 0 ? bestBrain : bestBrain.mutate());
     });
 
     generation++;
-    zoneRadius = CONFIG.initialZoneRadius; // Reset la zone
-}
-
-function updateUI() {
-    document.getElementById('gen').innerText = generation;
-    document.getElementById('maxScore').innerText = highScore;
-    document.getElementById('zoneRadiusDisplay').innerText = Math.round(zoneRadius);
-    
-    let html = "<b>État des Joueurs :</b><br><br>";
-    snakes.forEach((s) => {
-        html += `<div class="player-row">
-            <span>#${s.id} ${s.isAlive ? '❤️'.repeat(s.lives) : '💀'}</span>
-            <span>Taille: <b>${Math.round(s.length)}</b></span>
-        </div>`;
-    });
-    document.getElementById('playerStats').innerHTML = html;
+    zoneRadius = CONFIG.initialZoneRadius;
 }
 
 async function runFastForward() {
     if (isSimulating) return;
-    const iterations = parseInt(document.getElementById('iterInput').value);
+    const iters = parseInt(document.getElementById('iterInput').value);
     isSimulating = true;
-    document.getElementById('status').innerText = "Simulation accélérée...";
+    document.getElementById('status').innerText = "Calcul de l'évolution...";
 
-    for (let i = 0; i < iterations; i++) {
+    for (let i = 0; i < iters; i++) {
         while (snakes.some(s => s.isAlive)) {
-            zoneRadius -= CONFIG.zoneShrinkRate * 2; // Rétrécit plus vite en simu
+            zoneRadius -= 0.5;
             snakes.forEach(s => {
                 if (s.isAlive) {
-                    s.update();
+                    s.update(foods);
                     foods.forEach(f => {
-                        if (Math.hypot(s.x-f.x, s.y-f.y) < s.currentWidth + 5) {
-                            s.score++; s.length += 5; s.currentWidth += 0.5;
+                        if (Math.hypot(s.x-f.x, s.y-f.y) < s.currentWidth + 10) {
+                            s.length += 10; s.currentWidth += 0.3;
                             f.x = Math.random()*canvas.width; f.y = Math.random()*canvas.height;
                         }
                     });
                 }
             });
+            if (zoneRadius < 20) break;
         }
         evolve();
         if (i % 2 === 0) await new Promise(r => setTimeout(r, 1));
     }
     isSimulating = false;
-    document.getElementById('status').innerText = "Prêt !";
+    document.getElementById('status').innerText = "Évolution terminée !";
 }
 
 function loop() {
     if (!isSimulating) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "black";
+        ctx.fillRect(0,0, canvas.width, canvas.height);
         
-        // Dessiner la zone de sécurité
-        ctx.strokeStyle = "rgba(255, 71, 87, 0.5)";
-        ctx.lineWidth = 5;
+        // Zone
+        ctx.strokeStyle = "#e74c3c";
+        ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.arc(canvas.width/2, canvas.height/2, zoneRadius, 0, Math.PI*2);
         ctx.stroke();
 
-        zoneRadius -= CONFIG.zoneShrinkRate;
-        if (zoneRadius < 50) zoneRadius = 50;
+        zoneRadius -= 0.15;
+        if (zoneRadius < 30) zoneRadius = 30;
 
         if (!snakes.some(s => s.isAlive)) evolve();
 
+        // Food
+        ctx.fillStyle = "#2ecc71";
+        foods.forEach(f => {
+            ctx.beginPath(); ctx.arc(f.x, f.y, 5, 0, Math.PI*2); ctx.fill();
+        });
+
+        // Snakes
         snakes.forEach((s) => {
-            s.update();
+            s.update(foods);
             s.draw();
-            
             foods.forEach(f => {
-                ctx.fillStyle = "#0f0";
-                ctx.beginPath(); ctx.arc(f.x, f.y, 5, 0, Math.PI*2); ctx.fill();
-                if (s.isAlive && Math.hypot(s.x-f.x, s.y-f.y) < s.currentWidth + 5) {
-                    s.score++; 
-                    s.length += 5; 
-                    s.currentWidth += 0.5; // Grossit physiquement
+                if (s.isAlive && Math.hypot(s.x-f.x, s.y-f.y) < s.currentWidth + 8) {
+                    s.length += 10; 
+                    s.currentWidth += 0.3;
                     f.x = Math.random()*canvas.width; f.y = Math.random()*canvas.height;
                 }
             });
         });
-        updateUI();
+
+        // UI
+        document.getElementById('gen').innerText = generation;
+        document.getElementById('maxScore').innerText = Math.round(highScore);
+        let html = "<b>STATISTIQUES IA</b><br><br>";
+        snakes.forEach(s => {
+            html += `ID ${s.id}: ${s.isAlive ? '❤️'.repeat(s.lives) : '💀'} | Taille: ${Math.round(s.length)}<br>`;
+        });
+        document.getElementById('playerStats').innerHTML = html;
     }
     requestAnimationFrame(loop);
 }
