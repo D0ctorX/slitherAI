@@ -2,17 +2,18 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>AI Slither - Hunger System</title>
+    <title>AI Slither - Map Fix</title>
     <style>
         body { margin: 0; background: #1a1a1a; color: white; font-family: 'Segoe UI', sans-serif; display: flex; overflow: hidden; }
-        #sidebar { width: 300px; background: #2c3e50; padding: 20px; border-right: 3px solid #111; height: 100vh; box-sizing: border-box; }
+        #sidebar { width: 300px; background: #2c3e50; padding: 20px; border-right: 3px solid #111; height: 100vh; box-sizing: border-box; z-index: 10; }
         canvas { flex-grow: 1; background: #000; }
         .stat-box { background: #34495e; padding: 15px; margin-bottom: 10px; border-radius: 8px; }
+        input { width: 100%; padding: 8px; margin: 10px 0; border-radius: 4px; border: none; }
         button { cursor: pointer; background: #27ae60; color: white; border: none; padding: 12px; width: 100%; border-radius: 5px; font-weight: bold; }
         button:hover { background: #2ecc71; }
         .player-card { background: rgba(0,0,0,0.2); padding: 8px; margin-bottom: 5px; border-radius: 4px; font-size: 0.85em; }
         .hunger-bar-ui { height: 4px; background: #555; width: 100%; margin-top: 4px; }
-        .hunger-fill-ui { height: 100%; background: #2ecc71; transition: width 0.2s; }
+        .hunger-fill-ui { height: 100%; transition: width 0.2s; }
     </style>
 </head>
 <body>
@@ -21,12 +22,12 @@
     <h2>🧪 Labo IA</h2>
     <div class="stat-box">
         Génération: <span id="gen">1</span><br>
-        Meilleure Taille: <span id="maxScore">0</span>
+        Record Taille: <span id="maxScore">0</span>
     </div>
     
     <div class="stat-box">
-        <label>Simulations éclair :</label>
-        <input type="number" id="iterInput" value="10" min="1" style="width:100%; margin:10px 0; padding:8px;">
+        <label>Simulations (itérations) :</label>
+        <input type="number" id="iterInput" value="10" min="1">
         <button onclick="runFastForward()">Évoluer Vite</button>
         <div id="status" style="color:#f1c40f; margin-top:10px; text-align:center;"></div>
     </div>
@@ -49,19 +50,19 @@ resize();
 
 const CONFIG = {
     numSnakes: 6,
-    numFood: 60,
+    numFood: 80, // Augmenté pour mieux couvrir la map
     mutationRate: 0.2,
     maxLives: 3,
-    initialZoneRadius: Math.max(canvas.width, canvas.height) / 1.4,
-    hungerDepletion: 0.15, // Vitesse à laquelle la faim descend
-    foodEnergy: 35        // Énergie gagnée en mangeant
+    initialZoneRadius: Math.max(canvas.width, canvas.height),
+    hungerDepletion: 0.15,
+    foodEnergy: 35
 };
 
 let zoneRadius = CONFIG.initialZoneRadius;
 
+// --- LOGIQUE IA ---
 class NeuralNetwork {
     constructor(weights) {
-        // Inputs: Vision(16) + Faim(1) + Angle(1) = 18
         this.weights = weights || Array.from({length: 18}, () => Math.random() * 2 - 1);
     }
     predict(inputs) {
@@ -82,105 +83,74 @@ class Snake {
         this.brain = brain || new NeuralNetwork();
         this.fullReset();
     }
-
     fullReset() {
         this.lives = CONFIG.maxLives;
         this.score = 0;
-        this.distanceTraveled = 0;
         this.respawn();
     }
-
     respawn() {
-        this.x = canvas.width/2 + (Math.random()-0.5) * 200;
-        this.y = canvas.height/2 + (Math.random()-0.5) * 200;
+        this.x = canvas.width/2 + (Math.random()-0.5) * 100;
+        this.y = canvas.height/2 + (Math.random()-0.5) * 100;
         this.angle = Math.random() * Math.PI * 2;
         this.currentWidth = 8;
         this.tail = [];
         this.length = 15;
-        this.hunger = 100; 
+        this.hunger = 100;
         this.isAlive = true;
+        this.distanceTraveled = 0;
     }
-
     update(foods) {
         if (!this.isAlive) return;
-
-        // 1. Décrétion de la faim
         this.hunger -= CONFIG.hungerDepletion;
-        if (this.hunger <= 0) {
-            this.loseLife();
-            return;
-        }
+        if (this.hunger <= 0) { this.loseLife(); return; }
 
-        // 2. Vision (Rayons)
         let inputs = [];
         for (let i = 0; i < 8; i++) {
             let rayAngle = this.angle + (i * Math.PI * 2 / 8);
             let foodDist = 1;
-            let zoneDist = 1;
-
             foods.forEach(f => {
-                let dx = f.x - this.x; let dy = f.y - this.y;
+                let dx = f.x - this.x, dy = f.y - this.y;
                 let dist = Math.hypot(dx, dy);
-                if (dist < 250) {
+                if (dist < 300) {
                     let angleToFood = Math.atan2(dy, dx);
-                    if (Math.abs(rayAngle - angleToFood) < 0.3) foodDist = Math.min(foodDist, dist/250);
+                    if (Math.abs(rayAngle - angleToFood) < 0.3) foodDist = Math.min(foodDist, dist/300);
                 }
             });
-            
-            let rayX = this.x + Math.cos(rayAngle) * 100;
-            let rayY = this.y + Math.sin(rayAngle) * 100;
-            if (Math.hypot(rayX - canvas.width/2, rayY - canvas.height/2) > zoneRadius) zoneDist = 0;
-
+            let rayX = this.x + Math.cos(rayAngle) * 100, rayY = this.y + Math.sin(rayAngle) * 100;
+            let zoneDist = (Math.hypot(rayX - canvas.width/2, rayY - canvas.height/2) > zoneRadius) ? 0 : 1;
             inputs.push(foodDist, zoneDist);
         }
-        inputs.push(this.hunger / 100);
-        inputs.push(Math.sin(this.angle));
+        inputs.push(this.hunger/100, Math.sin(this.angle));
 
-        // 3. Action
         this.angle += this.brain.predict(inputs);
         this.x += Math.cos(this.angle) * 4;
         this.y += Math.sin(this.angle) * 4;
-        this.distanceTraveled += 0.05;
+        this.distanceTraveled += 0.1;
 
-        // 4. Mort par zone
-        if (Math.hypot(this.x - canvas.width/2, this.y - canvas.height/2) > zoneRadius) {
-            this.loseLife();
-        }
+        if (Math.hypot(this.x - canvas.width/2, this.y - canvas.height/2) > zoneRadius) this.loseLife();
 
         this.tail.unshift({x: this.x, y: this.y});
         if (this.tail.length > this.length) this.tail.pop();
     }
-
     loseLife() {
         this.lives--;
         if (this.lives > 0) this.respawn();
         else this.isAlive = false;
     }
-
     draw() {
         if (!this.isAlive) return;
-        
-        const color = `hsl(${(this.id * 60)}, 70%, 50%)`;
-        ctx.fillStyle = color;
+        ctx.fillStyle = `hsl(${(this.id * 60)}, 70%, 50%)`;
         this.tail.forEach((p, i) => {
             ctx.beginPath();
             ctx.arc(p.x, p.y, this.currentWidth * (1 - i/this.tail.length * 0.4), 0, Math.PI*2);
             ctx.fill();
         });
-
-        // Barre de faim au dessus de la tête
-        const barW = 30;
-        ctx.fillStyle = "#555";
-        ctx.fillRect(this.x - barW/2, this.y - 25, barW, 4);
-        ctx.fillStyle = this.hunger > 30 ? "#2ecc71" : "#e74c3c";
-        ctx.fillRect(this.x - barW/2, this.y - 25, barW * (this.hunger/100), 4);
-
-        ctx.fillStyle = "white";
-        ctx.font = "bold 11px Arial";
-        ctx.fillText(this.id, this.x - 4, this.y - 30);
+        ctx.fillStyle = "white"; ctx.font = "bold 10px Arial";
+        ctx.fillText("ID:"+this.id, this.x - 10, this.y - 15);
     }
 }
 
+// --- INITIALISATION ---
 let snakes = Array.from({length: CONFIG.numSnakes}, (_, i) => new Snake(i + 1));
 let foods = Array.from({length: CONFIG.numFood}, () => ({x: Math.random()*canvas.width, y: Math.random()*canvas.height}));
 let generation = 1;
@@ -200,69 +170,57 @@ async function runFastForward() {
     if (isSimulating) return;
     const iters = parseInt(document.getElementById('iterInput').value);
     isSimulating = true;
-    document.getElementById('status').innerText = "Evolution en cours...";
+    document.getElementById('status').innerText = "Simulation...";
     for (let i = 0; i < iters; i++) {
         while (snakes.some(s => s.isAlive)) {
-            zoneRadius -= 0.3;
+            zoneRadius -= 0.5;
             snakes.forEach(s => {
                 if (s.isAlive) {
                     s.update(foods);
                     foods.forEach(f => {
                         if (Math.hypot(s.x-f.x, s.y-f.y) < s.currentWidth + 10) {
-                            s.length += 8; s.currentWidth += 0.2;
-                            s.hunger = Math.min(100, s.hunger + CONFIG.foodEnergy);
+                            s.length += 8; s.hunger = Math.min(100, s.hunger + CONFIG.foodEnergy);
                             f.x = Math.random()*canvas.width; f.y = Math.random()*canvas.height;
                         }
                     });
                 }
             });
-            if (zoneRadius < 20) break;
+            if (zoneRadius < 50) break;
         }
         evolve();
-        if (i % 2 === 0) await new Promise(r => setTimeout(r, 1));
+        await new Promise(r => setTimeout(r, 1));
     }
     isSimulating = false;
-    document.getElementById('status').innerText = "Terminé !";
+    document.getElementById('status').innerText = "Fini !";
 }
 
 function loop() {
     if (!isSimulating) {
-        ctx.fillStyle = "#111";
-        ctx.fillRect(0,0, canvas.width, canvas.height);
-        
-        ctx.strokeStyle = "#e74c3c";
-        ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(canvas.width/2, canvas.height/2, zoneRadius, 0, Math.PI*2); ctx.stroke();
-        zoneRadius -= 0.1;
+        ctx.fillStyle = "#111"; ctx.fillRect(0,0, canvas.width, canvas.height);
+        ctx.strokeStyle = "#e74c3c"; ctx.beginPath(); ctx.arc(canvas.width/2, canvas.height/2, zoneRadius, 0, Math.PI*2); ctx.stroke();
+        zoneRadius -= 0.15; if (zoneRadius < 50) zoneRadius = 50;
 
         if (!snakes.some(s => s.isAlive)) evolve();
 
         foods.forEach(f => {
-            ctx.fillStyle = "#2ecc71";
-            ctx.beginPath(); ctx.arc(f.x, f.y, 4, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = "#2ecc71"; ctx.beginPath(); ctx.arc(f.x, f.y, 4, 0, Math.PI*2); ctx.fill();
         });
 
         snakes.forEach(s => {
-            s.update(foods);
-            s.draw();
+            s.update(foods); s.draw();
             foods.forEach(f => {
                 if (s.isAlive && Math.hypot(s.x-f.x, s.y-f.y) < s.currentWidth + 8) {
-                    s.length += 8; s.currentWidth += 0.2;
-                    s.hunger = Math.min(100, s.hunger + CONFIG.foodEnergy);
+                    s.length += 8; s.hunger = Math.min(100, s.hunger + CONFIG.foodEnergy);
                     f.x = Math.random()*canvas.width; f.y = Math.random()*canvas.height;
                 }
             });
         });
 
-        // UI Side
         document.getElementById('gen').innerText = generation;
         document.getElementById('maxScore').innerText = Math.round(highScore);
         let html = "";
         snakes.forEach(s => {
-            html += `<div class="player-card">
-                <b>IA #${s.id}</b> | Taille: ${Math.round(s.length)} | ${s.isAlive ? '❤️'.repeat(s.lives) : '💀'}
-                <div class="hunger-bar-ui"><div class="hunger-fill-ui" style="width:${s.hunger}%; background:${s.hunger < 30 ? '#ff4757' : '#2ecc71'}"></div></div>
-            </div>`;
+            html += `<div class="player-card"><b>IA #${s.id}</b> | L: ${Math.round(s.length)} | ${s.isAlive ? '❤️'.repeat(s.lives) : '💀'}<div class="hunger-bar-ui"><div class="hunger-fill-ui" style="width:${s.hunger}%; background:${s.hunger < 30 ? '#ff4757' : '#2ecc71'}"></div></div></div>`;
         });
         document.getElementById('playerStats').innerHTML = html;
     }
